@@ -7,7 +7,7 @@
 package examples
 
 import (
-	. "github.com/0x19/goesl"
+	. "github.com/zyxar/eventsocket"
 	"runtime"
 	"strings"
 )

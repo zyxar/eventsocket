@@ -4,7 +4,7 @@
 // I didn't write all of this code so you could say it's yours.
 // MIT License
 
-package goesl
+package eventsocket
 
 // StringInSlice - Will check if string in list. This is equivalent to python if x in []
 // @TODO - What the fuck Nevio...

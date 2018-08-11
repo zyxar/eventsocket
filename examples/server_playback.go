@@ -8,7 +8,7 @@ package examples
 
 import (
 	"fmt"
-	. "github.com/0x19/goesl"
+	. "github.com/zyxar/eventsocket"
 	"os"
 	"runtime"
 	"strings"

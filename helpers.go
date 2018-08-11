@@ -4,7 +4,7 @@
 // I didn't write all of this code so you could say it's yours.
 // MIT License
 
-package goesl
+package eventsocket
 
 // Set - Helper that you can use to execute SET application against active ESL session
 func (sc *SocketConnection) ExecuteSet(key string, value string, sync bool) (m *Message, err error) {
