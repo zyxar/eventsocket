@@ -41,7 +41,6 @@ func (s *Server) Start(fn func(conn *SocketConnection)) {
 				err:  make(chan error),
 				m:    make(chan *Message),
 			}
-			Notice("Got new connection from: %s", conn.OriginatorAddr())
 			go conn.Handle()
 			go fn(conn)
 		}
@@ -63,7 +62,7 @@ func (s *Server) Wait() { s.closeWg.Wait() }
 // NewServer - Will instanciate new outbound server
 func NewServer(addr string) (s *Server, err error) {
 	if len(addr) < 2 {
-		addr = os.Getenv("GOESL_OUTBOUND_SERVER_ADDR")
+		addr = os.Getenv("ESL_OUTBOUND_SERVER_ADDR")
 		if addr == "" {
 			return nil, fmt.Errorf(EInvalidServerAddr, addr)
 		}

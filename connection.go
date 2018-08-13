@@ -166,12 +166,6 @@ func (c *SocketConnection) SendMsg(msg map[string]string, uuid, data string) (m 
 	}
 }
 
-// OriginatorAdd - Will return originator address known as net.RemoteAddr()
-// This will actually be a freeswitch address
-func (c *SocketConnection) OriginatorAddr() net.Addr {
-	return c.RemoteAddr()
-}
-
 // ReadMessage - Will read message from channels and return them back accordingy.
 // If error is received, error will be returned. If not, message will be returned back!
 func (c *SocketConnection) ReadMessage() (*Message, error) {

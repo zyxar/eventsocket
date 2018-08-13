@@ -37,7 +37,7 @@ func main() {
 
 // handle handles connection of tts outbound server
 func handle(conn *SocketConnection) {
-	Notice("New incomming connection: %v", conn)
+	Debug("New incomming connection: %v", conn.RemoteAddr())
 	if err := conn.Connect(); err != nil {
 		Error("Got error while accepting connection: %s", err)
 		return
