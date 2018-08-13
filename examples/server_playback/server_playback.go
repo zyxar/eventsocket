@@ -7,107 +7,88 @@
 package main
 
 import (
-	"fmt"
-	. "github.com/zyxar/eventsocket"
+	"flag"
 	"os"
-	"runtime"
 	"strings"
+
+	. "github.com/zyxar/eventsocket"
+	"github.com/zyxar/grace/sigutil"
 )
 
-var welcomeFile = "%s/media/welcome.wav"
+var welcomeFile = flag.String("wav", "../media/welcome.wav", "set welcome wav file")
 
 func main() {
-
-	defer func() {
-		if r := recover(); r != nil {
-			Error("Recovered in f", r)
+	flag.Parse()
+	if *welcomeFile == "" {
+		Error("welcome wav file not fould")
+		os.Exit(1)
+	}
+	{
+		file, err := os.Open(*welcomeFile)
+		if err != nil {
+			Error(err.Error())
+			os.Exit(1)
 		}
-	}()
+		file.Close()
+	}
 
-	// Boost it as much as it can go ...
-	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	wd, err := os.Getwd()
-
+	server, err := NewServer("localhost:8084")
 	if err != nil {
-		Error("Error while attempt to get WD: %s", wd)
+		Error("Got error while starting Freeswitch outbound server: %s", err)
 		os.Exit(1)
 	}
 
-	welcomeFile = fmt.Sprintf(welcomeFile, wd)
-
-	if s, err := NewOutboundServer(":8084"); err != nil {
-		Error("Got error while starting Freeswitch outbound server: %s", err)
-	} else {
-		go handle(s)
-		s.Start()
-	}
-
+	Notice("starting server: %v", server.Addr())
+	server.Start(handle)
+	sigutil.Trap(func(s sigutil.Signal) {
+		Notice("shutting down server from receiving %s", s)
+		if err := server.Close(); err != nil {
+			Error("server close: %s", err)
+		}
+		server.Wait()
+	}, sigutil.SIGINT, sigutil.SIGTERM)
 }
 
 // handle - Running under goroutine here to explain how to handle playback ( play to the caller )
-func handle(s *OutboundServer) {
-
-	for {
-
-		select {
-
-		case conn := <-s.Conns:
-			Notice("New incomming connection: %v", conn)
-
-			if err := conn.Connect(); err != nil {
-				Error("Got error while accepting connection: %s", err)
-				break
-			}
-
-			answer, err := conn.ExecuteAnswer("", false)
-
-			if err != nil {
-				Error("Got error while executing answer: %s", err)
-				break
-			}
-
-			Debug("Answer Message: %s", answer)
-			Debug("Caller UUID: %s", answer.GetHeader("Caller-Unique-Id"))
-
-			cUUID := answer.GetCallUUID()
-
-			if sm, err := conn.Execute("playback", welcomeFile, true); err != nil {
-				Error("Got error while executing playback: %s", err)
-				break
-			} else {
-				Debug("Playback Message: %s", sm)
-			}
-
-			if hm, err := conn.ExecuteHangup(cUUID, "", false); err != nil {
-				Error("Got error while executing hangup: %s", err)
-				break
-			} else {
-				Debug("Hangup Message: %s", hm)
-			}
-
-			go func() {
-				for {
-					msg, err := conn.ReadMessage()
-
-					if err != nil {
-
-						// If it contains EOF, we really dont care...
-						if !strings.Contains(err.Error(), "EOF") {
-							Error("Error while reading Freeswitch message: %s", err)
-						}
-						break
-					}
-
-					Debug("%s", msg)
-				}
-			}()
-
-		default:
-			// YabbaDabbaDooooo!
-			//Flintstones. Meet the Flintstones. They're the modern stone age family. From the town of Bedrock,
-			// They're a page right out of history. La la,lalalalala la :D
-		}
+func handle(conn *SocketConnection) {
+	Notice("New incomming connection: %v", conn)
+	if err := conn.Connect(); err != nil {
+		Error("Got error while accepting connection: %s", err)
+		return
+	}
+	answer, err := conn.ExecuteAnswer("", false)
+	if err != nil {
+		Error("Got error while executing answer: %s", err)
+		return
 	}
 
+	Debug("Answer Message: %s", answer)
+	Debug("Caller UUID: %s", answer.GetHeader("Caller-Unique-Id"))
+
+	cUUID := answer.GetCallUUID()
+	if sm, err := conn.Execute("playback", *welcomeFile, true); err != nil {
+		Error("Got error while executing playback: %s", err)
+		return
+	} else {
+		Debug("Playback Message: %s", sm)
+	}
+
+	if hm, err := conn.ExecuteHangup(cUUID, "", false); err != nil {
+		Error("Got error while executing hangup: %s", err)
+		return
+	} else {
+		Debug("Hangup Message: %s", hm)
+	}
+
+	for {
+		msg, err := conn.ReadMessage()
+		if err != nil {
+			// If it contains EOF, we really dont care...
+			if !strings.Contains(err.Error(), "EOF") {
+				Error("Error while reading Freeswitch message: %s", err)
+			}
+			break
+		}
+		Debug("%s", msg)
+	}
 }

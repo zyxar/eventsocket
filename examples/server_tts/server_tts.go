@@ -7,9 +7,11 @@
 package main
 
 import (
-	. "github.com/zyxar/eventsocket"
-	"runtime"
+	"os"
 	"strings"
+
+	. "github.com/zyxar/eventsocket"
+	"github.com/zyxar/grace/sigutil"
 )
 
 var (
@@ -17,100 +19,74 @@ var (
 )
 
 func main() {
-
-	defer func() {
-		if r := recover(); r != nil {
-			Error("Recovered in: ", r)
-		}
-	}()
-
-	// Boost it as much as it can go ...
-	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	if s, err := NewOutboundServer(":8084"); err != nil {
+	server, err := NewServer("localhost:8084")
+	if err != nil {
 		Error("Got error while starting Freeswitch outbound server: %s", err)
-	} else {
-		go handle(s)
-		s.Start()
+		os.Exit(1)
 	}
-
+	Notice("starting server: %v", server.Addr())
+	server.Start(handle)
+	sigutil.Trap(func(s sigutil.Signal) {
+		Notice("shutting down server from receiving %s", s)
+		if err := server.Close(); err != nil {
+			Error("server close: %s", err)
+		}
+		server.Wait()
+	}, sigutil.SIGINT, sigutil.SIGTERM)
 }
 
-// handle - Running under goroutine here to explain how to run tts outbound server
-func handle(s *OutboundServer) {
+// handle handles connection of tts outbound server
+func handle(conn *SocketConnection) {
+	Notice("New incomming connection: %v", conn)
+	if err := conn.Connect(); err != nil {
+		Error("Got error while accepting connection: %s", err)
+		return
+	}
+	answer, err := conn.ExecuteAnswer("", false)
+	if err != nil {
+		Error("Got error while executing answer: %s", err)
+		return
+	}
+	Debug("Answer Message: %s", answer)
+	Debug("Caller UUID: %s", answer.GetHeader("Caller-Unique-Id"))
 
-	for {
+	cUUID := answer.GetCallUUID()
 
-		select {
-
-		case conn := <-s.Conns:
-			Notice("New incomming connection: %v", conn)
-
-			if err := conn.Connect(); err != nil {
-				Error("Got error while accepting connection: %s", err)
-				break
-			}
-
-			answer, err := conn.ExecuteAnswer("", false)
-
-			if err != nil {
-				Error("Got error while executing answer: %s", err)
-				break
-			}
-
-			Debug("Answer Message: %s", answer)
-			Debug("Caller UUID: %s", answer.GetHeader("Caller-Unique-Id"))
-
-			cUUID := answer.GetCallUUID()
-
-			if te, err := conn.ExecuteSet("tts_engine", "flite", false); err != nil {
-				Error("Got error while attempting to set tts_engine: %s", err)
-			} else {
-				Debug("TTS Engine Msg: %s", te)
-			}
-
-			if tv, err := conn.ExecuteSet("tts_voice", "slt", false); err != nil {
-				Error("Got error while attempting to set tts_voice: %s", err)
-			} else {
-				Debug("TTS Voice Msg: %s", tv)
-			}
-
-			if sm, err := conn.Execute("speak", goeslMessage, true); err != nil {
-				Error("Got error while executing speak: %s", err)
-				break
-			} else {
-				Debug("Speak Message: %s", sm)
-			}
-
-			if hm, err := conn.ExecuteHangup(cUUID, "", false); err != nil {
-				Error("Got error while executing hangup: %s", err)
-				break
-			} else {
-				Debug("Hangup Message: %s", hm)
-			}
-
-			go func() {
-				for {
-					msg, err := conn.ReadMessage()
-
-					if err != nil {
-
-						// If it contains EOF, we really dont care...
-						if !strings.Contains(err.Error(), "EOF") {
-							Error("Error while reading Freeswitch message: %s", err)
-						}
-						break
-					}
-
-					Debug("%s", msg)
-				}
-			}()
-
-		default:
-			// YabbaDabbaDooooo!
-			//Flintstones. Meet the Flintstones. They're the modern stone age family. From the town of Bedrock,
-			// They're a page right out of history. La la,lalalalala la :D
-		}
+	if te, err := conn.ExecuteSet("tts_engine", "flite", false); err != nil {
+		Error("Got error while attempting to set tts_engine: %s", err)
+	} else {
+		Debug("TTS Engine Msg: %s", te)
 	}
 
+	if tv, err := conn.ExecuteSet("tts_voice", "slt", false); err != nil {
+		Error("Got error while attempting to set tts_voice: %s", err)
+	} else {
+		Debug("TTS Voice Msg: %s", tv)
+	}
+
+	if sm, err := conn.Execute("speak", goeslMessage, true); err != nil {
+		Error("Got error while executing speak: %s", err)
+		return
+	} else {
+		Debug("Speak Message: %s", sm)
+	}
+
+	if hm, err := conn.ExecuteHangup(cUUID, "", false); err != nil {
+		Error("Got error while executing hangup: %s", err)
+		return
+	} else {
+		Debug("Hangup Message: %s", hm)
+	}
+
+	for {
+		msg, err := conn.ReadMessage()
+		if err != nil {
+			// If it contains EOF, we really dont care...
+			if !strings.Contains(err.Error(), "EOF") {
+				Error("Error while reading Freeswitch message: %s", err)
+			}
+			break
+		}
+		Debug("%s", msg)
+	}
 }

@@ -10,101 +10,69 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/signal"
-	"syscall"
+	"sync"
 )
 
-// OutboundServer - In case you need to start server, this Struct have it covered
-type OutboundServer struct {
+// Server - In case you need to start server, this Struct have it covered
+type Server struct {
 	net.Listener
-
-	Addr  string `json:"address"`
-	Proto string
-
-	Conns chan SocketConnection
+	closeWg   sync.WaitGroup
+	closeOnce sync.Once
+	closeChan chan struct{}
 }
 
 // Start - Will start new outbound server
-func (s *OutboundServer) Start() error {
-	Notice("Starting Freeswitch Outbound Server @ (address: %s) ...", s.Addr)
-
-	var err error
-
-	s.Listener, err = net.Listen(s.Proto, s.Addr)
-
-	if err != nil {
-		Error(ECouldNotStartListener, err)
-		return err
-	}
-
-	quit := make(chan bool)
-
+func (s *Server) Start(fn func(conn *SocketConnection)) {
+	s.closeWg.Add(1)
 	go func() {
+		defer s.closeWg.Done()
 		for {
-			Warning("Waiting for incoming connections ...")
-
 			c, err := s.Accept()
-
 			if err != nil {
-				Error(EListenerConnection, err)
-				quit <- true
-				break
+				select {
+				case <-s.closeChan:
+				default:
+					Error(EListenerConnection, err)
+				}
+				return
 			}
-
-			conn := SocketConnection{
+			conn := &SocketConnection{
 				Conn: c,
 				err:  make(chan error),
 				m:    make(chan *Message),
 			}
-
 			Notice("Got new connection from: %s", conn.OriginatorAddr())
-
 			go conn.Handle()
-
-			s.Conns <- conn
+			go fn(conn)
 		}
 	}()
-
-	<-quit
-
-	// Stopping server itself ...
-	s.Stop()
-
-	return err
 }
 
-// Stop - Will close server connection once SIGTERM/Interrupt is received
-func (s *OutboundServer) Stop() {
-	Warning("Stopping Outbound Server ...")
-	s.Close()
+// Close - Will close server connection
+func (s *Server) Close() (err error) {
+	s.closeOnce.Do(func() {
+		close(s.closeChan)
+		err = s.Listener.Close()
+	})
+	return
 }
 
-// NewOutboundServer - Will instanciate new outbound server
-func NewOutboundServer(addr string) (*OutboundServer, error) {
+// Wait waits until backgroud routines quit
+func (s *Server) Wait() { s.closeWg.Wait() }
+
+// NewServer - Will instanciate new outbound server
+func NewServer(addr string) (s *Server, err error) {
 	if len(addr) < 2 {
 		addr = os.Getenv("GOESL_OUTBOUND_SERVER_ADDR")
-
 		if addr == "" {
 			return nil, fmt.Errorf(EInvalidServerAddr, addr)
 		}
 	}
-
-	server := OutboundServer{
-		Addr:  addr,
-		Proto: "tcp",
-		Conns: make(chan SocketConnection),
+	s = &Server{}
+	if s.Listener, err = net.Listen("tcp", addr); err != nil {
+		Error(ECouldNotStartListener, err)
+		return
 	}
-
-	sig := make(chan os.Signal, 1)
-
-	signal.Notify(sig, os.Interrupt)
-	signal.Notify(sig, syscall.SIGTERM)
-
-	go func() {
-		<-sig
-		server.Stop()
-		os.Exit(1)
-	}()
-
-	return &server, nil
+	s.closeChan = make(chan struct{})
+	return
 }
