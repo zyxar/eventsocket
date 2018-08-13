@@ -19,33 +19,11 @@ import (
 // sofia statuses or whatever else you came up with
 type Client struct {
 	SocketConnection
-
-	Proto   string `json:"freeswitch_protocol"`
-	Addr    string `json:"freeswitch_addr"`
-	Passwd  string `json:"freeswitch_password"`
-	Timeout int    `json:"freeswitch_connection_timeout"`
 }
 
-// EstablishConnection - Will attempt to establish connection against freeswitch and create new SocketConnection
-func (c *Client) EstablishConnection() error {
-	conn, err := c.Dial(c.Proto, c.Addr, time.Duration(c.Timeout*int(time.Second)))
-	if err != nil {
-		return err
-	}
-
-	c.SocketConnection = SocketConnection{
-		Conn: conn,
-		err:  make(chan error),
-		m:    make(chan *Message),
-	}
-
-	return nil
-}
-
-// Authenticate - Method used to authenticate client against freeswitch. In case of any errors durring so
+// auth - Method used to authenticate client against freeswitch. In case of any errors durring so
 // we will return error.
-func (c *Client) Authenticate() error {
-
+func (c *Client) auth(passwd string) error {
 	m, err := newMessage(bufio.NewReaderSize(c, ReadBufferSize), false)
 	if err != nil {
 		Error(ECouldNotCreateMessage, err)
@@ -65,7 +43,7 @@ func (c *Client) Authenticate() error {
 		return fmt.Errorf(EUnexpectedAuthHeader, cmr.Get("Content-Type"))
 	}
 
-	s := "auth " + c.Passwd + "\r\n\r\n"
+	s := "auth " + passwd + "\r\n\r\n"
 	_, err = io.WriteString(c, s)
 	if err != nil {
 		return err
@@ -78,8 +56,8 @@ func (c *Client) Authenticate() error {
 	}
 
 	if am.Get("Reply-Text") != "+OK accepted" {
-		Error(EInvalidPassword, c.Passwd)
-		return fmt.Errorf(EInvalidPassword, c.Passwd)
+		Error(EInvalidPassword, passwd)
+		return fmt.Errorf(EInvalidPassword, passwd)
 	}
 
 	return nil
@@ -87,24 +65,25 @@ func (c *Client) Authenticate() error {
 
 // NewClient - Will initiate new client that will establish connection and attempt to authenticate
 // against connected freeswitch server
-func NewClient(host string, port uint, passwd string, timeout int) (*Client, error) {
-	client := Client{
-		Proto:   "tcp", // Let me know if you ever need this open up lol
-		Addr:    net.JoinHostPort(host, strconv.Itoa(int(port))),
-		Passwd:  passwd,
-		Timeout: timeout,
-	}
+func NewClient(host string, port uint, passwd string, timeout time.Duration) (*Client, error) {
 
-	err := client.EstablishConnection()
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(int(port))), timeout)
 	if err != nil {
 		return nil, err
 	}
 
-	err = client.Authenticate()
-	if err != nil {
+	client := &Client{
+		SocketConnection: SocketConnection{
+			Conn: conn,
+			err:  make(chan error),
+			m:    make(chan *Message),
+		},
+	}
+
+	if err = client.auth(passwd); err != nil {
 		client.Close()
 		return nil, err
 	}
 
-	return &client, nil
+	return client, nil
 }

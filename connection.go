@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 )
 
 // Main connection against ESL - Gotta add more description here
@@ -26,14 +25,8 @@ type SocketConnection struct {
 	mtx sync.Mutex
 }
 
-// Dial - Will establish timedout dial against specified address. In this case, it will be freeswitch server
-func (c *SocketConnection) Dial(network string, addr string, timeout time.Duration) (net.Conn, error) {
-	return net.DialTimeout(network, addr, timeout)
-}
-
 // Send - Will send raw message to open net connection
 func (c *SocketConnection) Send(cmd string) error {
-
 	if strings.Contains(cmd, "\r\n") {
 		return fmt.Errorf(EInvalidCommandProvided, cmd)
 	}
@@ -57,7 +50,6 @@ func (c *SocketConnection) Send(cmd string) error {
 
 // SendMany - Will loop against passed commands and return 1st error if error happens
 func (c *SocketConnection) SendMany(cmds []string) error {
-
 	for _, cmd := range cmds {
 		if err := c.Send(cmd); err != nil {
 			return err
@@ -125,7 +117,6 @@ func (c *SocketConnection) ExecuteUUID(uuid string, command string, args string,
 
 // SendMsg - Basically this func will send message to the opened connection
 func (c *SocketConnection) SendMsg(msg map[string]string, uuid, data string) (m *Message, err error) {
-
 	b := bytes.NewBufferString("sendmsg")
 
 	if uuid != "" {
@@ -196,34 +187,13 @@ func (c *SocketConnection) ReadMessage() (*Message, error) {
 
 // Handle - Will handle new messages and close connection when there are no messages left to process
 func (c *SocketConnection) Handle() {
-
-	done := make(chan bool)
-
-	go func() {
-		for {
-			msg, err := newMessage(bufio.NewReaderSize(c, ReadBufferSize), true)
-
-			if err != nil {
-				c.err <- err
-				done <- true
-				break
-			}
-
-			c.m <- msg
+	defer c.Conn.Close()
+	for {
+		msg, err := newMessage(bufio.NewReaderSize(c, ReadBufferSize), true)
+		if err != nil {
+			c.err <- err
+			break
 		}
-	}()
-
-	<-done
-
-	// Closing the connection now as there's nothing left to do ...
-	c.Close()
-}
-
-// Close - Will close down net connection and return error if error happen
-func (c *SocketConnection) Close() error {
-	if err := c.Conn.Close(); err != nil {
-		return err
+		c.m <- msg
 	}
-
-	return nil
 }
